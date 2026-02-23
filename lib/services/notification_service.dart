@@ -28,12 +28,8 @@ class NotificationService {
     if (_initialized) return;
 
     tzdata.initializeTimeZones();
-    final dynamic tzRaw = await FlutterTimezone.getLocalTimezone();
-    final String tzNameString = RegExp(r'\(([^,]+),')
-        .firstMatch(tzRaw.toString())
-        ?.group(1)
-        ?.trim() ?? 'America/New_York';
-    tz.setLocalLocation(tz.getLocation(tzNameString));
+    final TimezoneInfo currentTimeZone = await FlutterTimezone.getLocalTimezone();
+    tz.setLocalLocation(tz.getLocation(currentTimeZone.identifier));
 
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
     const settings = InitializationSettings(android: android);
