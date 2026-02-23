@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:audioplayers/audioplayers.dart';
@@ -7,9 +8,13 @@ import 'package:path_provider/path_provider.dart';
 import '../services/storage_service.dart';
 import '../services/tts_service.dart';
 import '../services/speech_service.dart';
+import '../services/ai_service.dart';
 import '../services/notification_service.dart';
 import '../screens/pin_screen.dart';
+import '../widgets/date_time_display.dart';
 import '../widgets/family_button.dart';
+import '../widgets/primary_button.dart';
+import '../widgets/secondary_button.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -40,6 +45,8 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
   late AnimationController _fadeController;
   late Animation<double> _fadeAnim;
 
+  late Timer _greetingTimer;
+
   static const int _ownVoiceIndex = 4;
 
   static const _navy = Color(0xFF1E3A5F);
@@ -52,6 +59,11 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+
+    _greetingTimer = Timer.periodic(
+      const Duration(minutes: 1),
+          (_) => setState(() {}),
+    );
 
     _pulseController = AnimationController(
       vsync: this,
@@ -230,21 +242,32 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     try {
       final prompt = await TtsService.nextPrompt();
       await TtsService.speakAndWait(prompt);
+
+      await TtsService.stop();
+      await Future.delayed(const Duration(milliseconds: 300));
+
       if (!_isTalking || !mounted) return;
 
-      setState(() => _status = 'Listening... 🎙');
+      setState(() => _status = 'Listening...');
       final heard = await SpeechService.listen(duration: const Duration(seconds: 12));
       if (!_isTalking || !mounted) return;
 
       if (heard.trim().isNotEmpty) {
         setState(() => _status = '"${heard.trim()}"');
-        await Future.delayed(const Duration(seconds: 2));
+        await Future.delayed(const Duration(milliseconds: 800));
         if (!_isTalking || !mounted) return;
       }
 
+      setState(() => _status = 'Thinking...');
+      final aiReply = await AiService.respond(
+        prompt: prompt,
+        userSpeech: heard,
+      );
+      if (!_isTalking || !mounted) return;
+
+      final reply = aiReply ?? TtsService.randomFallbackAffirmation();
       setState(() => _status = 'Speaking to you...');
-      final affirmation = await TtsService.nextAffirmation();
-      await TtsService.speakAndWait(affirmation);
+      await TtsService.speakAndWait(reply);
     } finally {
       if (mounted) {
         _pulseController.repeat(reverse: true);
@@ -275,7 +298,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
       final dir = await getApplicationDocumentsDirectory();
       final path = '${dir.path}/patient_voice.m4a';
       await _recorder.start(const RecordConfig(encoder: AudioEncoder.aacLc), path: path);
-      setState(() { _isRecording = true; _status = 'Recording... 🔴'; });
+      setState(() { _isRecording = true; _status = 'Recording... '; });
     }
   }
 
@@ -311,6 +334,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     _fadeController.dispose();
     _player.dispose();
     _recorder.dispose();
+    _greetingTimer.cancel();
     super.dispose();
   }
 
@@ -429,7 +453,6 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                 ),
 
                 const SizedBox(height: 24),
-
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 28),
                   child: Row(
@@ -443,6 +466,9 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                     ],
                   ),
                 ),
+                const SizedBox(height: 14),
+
+                const DateTimeDisplay(),
                 const SizedBox(height: 14),
 
                 Expanded(
@@ -488,7 +514,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                   ),
                   child: Column(
                     children: [
-                      _PrimaryButton(
+                      PrimaryButton(
                         onPressed: _talkToMe,
                         icon: _isTalking ? Icons.cancel_rounded : Icons.chat_bubble_rounded,
                         label: _isTalking ? 'Stop' : 'Talk to Me',
@@ -503,7 +529,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                       Row(
                         children: [
                           Expanded(
-                            child: _SecondaryButton(
+                            child: SecondaryButton(
                               onPressed: _toggleRecording,
                               icon: _isRecording ? Icons.stop_rounded : Icons.mic_rounded,
                               label: _isRecording ? 'Stop' : _hasOwnRecording ? 'Re-record' : 'Record Voice',
@@ -513,7 +539,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                           if (_hasOwnRecording) ...[
                             const SizedBox(width: 10),
                             Expanded(
-                              child: _SecondaryButton(
+                              child: SecondaryButton(
                                 onPressed: _playOwnVoice,
                                 icon: isPlayingOwnVoice ? Icons.stop_rounded : Icons.volume_up_rounded,
                                 label: isPlayingOwnVoice ? 'Stop' : 'My Voice',
@@ -529,104 +555,6 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
               ],
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _PrimaryButton extends StatelessWidget {
-  final VoidCallback onPressed;
-  final IconData icon;
-  final String label;
-  final Gradient gradient;
-  final bool isActive;
-  final Animation<double>? pulseAnim;
-
-  const _PrimaryButton({
-    required this.onPressed,
-    required this.icon,
-    required this.label,
-    required this.gradient,
-    this.isActive = false,
-    this.pulseAnim,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    Widget button = GestureDetector(
-      onTap: onPressed,
-      child: Container(
-        height: 68,
-        decoration: BoxDecoration(
-          gradient: gradient,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: (isActive ? const Color(0xFF3A9E8F) : const Color(0xFF1E3A5F)).withValues(alpha: 0.35),
-              blurRadius: 16,
-              offset: const Offset(0, 6),
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: Colors.white, size: 28),
-            const SizedBox(width: 12),
-            Text(
-              label,
-              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: Colors.white, letterSpacing: -0.2),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (pulseAnim != null) {
-      return ScaleTransition(scale: pulseAnim!, child: button);
-    }
-    return button;
-  }
-}
-
-class _SecondaryButton extends StatelessWidget {
-  final VoidCallback onPressed;
-  final IconData icon;
-  final String label;
-  final Color color;
-
-  const _SecondaryButton({
-    required this.onPressed,
-    required this.icon,
-    required this.label,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onPressed,
-      child: Container(
-        height: 56,
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: color.withValues(alpha: 0.25), width: 1.5),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: color, size: 22),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                label,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: color),
-              ),
-            ),
-          ],
         ),
       ),
     );

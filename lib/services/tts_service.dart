@@ -1,13 +1,15 @@
-import 'dart:async';
-import 'package:flutter_tts/flutter_tts.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class TtsService {
-  static final FlutterTts _tts = FlutterTts();
-  static bool _initialized = false;
+  static const String _apiKey = '';
+  static const String _voiceId = 'yj30vwTGJxSHezdAGsv9';
+
+  static final AudioPlayer _audioPlayer = AudioPlayer();
 
   static const String _keyPromptIndex = 'tts_prompt_index';
-  static const String _keyAffirmationIndex = 'tts_affirmation_index';
 
   static const List<String> _prompts = [
     'What is your favorite meal?',
@@ -24,7 +26,7 @@ class TtsService {
     'What is your favorite thing to do on a quiet day?',
   ];
 
-  static const List<String> _affirmations = [
+  static const List<String> _fallbackAffirmations = [
     'You are loved and you are safe.',
     'You are doing a wonderful job today.',
     'The people who love you are thinking of you.',
@@ -37,41 +39,57 @@ class TtsService {
     'You have such a warm heart.',
   ];
 
-  static Future<void> init() async {
-    if (_initialized) return;
-    await _tts.setLanguage('en-US');
-    await _tts.setSpeechRate(0.42);
-    await _tts.setVolume(1.0);
-    await _tts.setPitch(1.0);
-    _initialized = true;
-  }
-
   static Future<void> speak(String text) async {
-    await init();
-    await _tts.stop();
-    await _tts.speak(text);
-  }
+    final url = Uri.parse(
+      'https://api.elevenlabs.io/v1/text-to-speech/$_voiceId',
+    );
 
-  static Future<void> speakAndWait(String text) async {
-    await init();
-    await _tts.stop();
+    final response = await http.post(
+      url,
+      headers: {
+        'Accept': 'audio/mpeg',
+        'xi-api-key': _apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({
+        'text': text,
+        'model_id': 'eleven_multilingual_v2',
+        'voice_settings': {
+          'stability': 0.5,
+          'similarity_boost': 0.75,
+        }
+      }),
+    );
 
-    final completer = Completer<void>();
-
-    _tts.setCompletionHandler(() {
-      if (!completer.isCompleted) completer.complete();
-    });
-
-    _tts.setErrorHandler((msg) {
-      if (!completer.isCompleted) completer.complete();
-    });
-
-    await _tts.speak(text);
-    await completer.future;
+    if (response.statusCode == 200) {
+      await _audioPlayer.setAudioSource(
+        AudioSource.uri(
+          Uri.dataFromBytes(
+            response.bodyBytes,
+            mimeType: 'audio/mpeg',
+          ),
+        ),
+      );
+      await _audioPlayer.play();
+    } else {
+      print('ElevenLabs ERROR: ${response.statusCode}');
+      print(response.body);
+      throw Exception('Failed to generate speech');
+    }
   }
 
   static Future<void> stop() async {
-    await _tts.stop();
+    await _audioPlayer.stop();
+  }
+
+  static Future<void> speakAndWait(String text) async {
+    await speak(text);
+
+    await _audioPlayer.playerStateStream.firstWhere(
+          (state) =>
+      state.processingState == ProcessingState.completed ||
+          state.processingState == ProcessingState.idle,
+    );
   }
 
   static Future<String> nextPrompt() async {
@@ -82,29 +100,26 @@ class TtsService {
     return prompt;
   }
 
-  static Future<String> nextAffirmation() async {
-    final prefs = await SharedPreferences.getInstance();
-    final index = prefs.getInt(_keyAffirmationIndex) ?? 0;
-    final affirmation = _affirmations[index % _affirmations.length];
-    await prefs.setInt(_keyAffirmationIndex, index + 1);
-    return affirmation;
+  static String randomFallbackAffirmation() {
+    final index =
+        DateTime.now().millisecond % _fallbackAffirmations.length;
+    return _fallbackAffirmations[index];
   }
 
   static Future<void> speakReminder(String reminderKey) async {
-    await init();
-    await _tts.stop();
-    final label = _reminderMessages[reminderKey] ?? 'You have a reminder.';
-    await _tts.speak(label);
+    final label =
+        _reminderMessages[reminderKey] ?? 'You have a reminder.';
+    await speak(label);
   }
 
   static const Map<String, String> _reminderMessages = {
-    'medication':  'It is time to take your medication.',
-    'breakfast':   'Good morning. It is time for breakfast.',
-    'lunch':       'It is time for lunch.',
-    'dinner':      'It is time for dinner.',
-    'hydration':   'Please drink a glass of water.',
-    'exercise':    'It is time for a short walk.',
+    'medication': 'It is time to take your medication.',
+    'breakfast': 'Good morning. It is time for breakfast.',
+    'lunch': 'It is time for lunch.',
+    'dinner': 'It is time for dinner.',
+    'hydration': 'Please drink a glass of water.',
+    'exercise': 'It is time for a short walk.',
     'family_call': 'It is a good time to call your family.',
-    'bedtime':     'It is time to get ready for bed. Good night.',
+    'bedtime': 'It is time to get ready for bed. Good night.',
   };
 }

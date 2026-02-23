@@ -25,6 +25,9 @@ class SpeechService {
 
     final completer = _SpeechCompleter();
 
+    await _stt.stop();
+    await Future.delayed(const Duration(milliseconds: 200));
+
     await _stt.listen(
       listenFor: duration,
       pauseFor: const Duration(seconds: 4),
