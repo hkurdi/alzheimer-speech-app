@@ -21,6 +21,7 @@ class _MainScreenState extends State<MainScreen> {
 
   String _patientName = 'Friend';
   List<String> _familyNames = ['', '', '', ''];
+
   List<String> _familyPaths = ['', '', '', ''];
 
   int _playingIndex = -1;
@@ -40,21 +41,24 @@ class _MainScreenState extends State<MainScreen> {
     _loadData();
     _player.onPlayerComplete.listen((_) {
       if (!mounted) return;
-      setState(() {
-        _playingIndex = -1;
-        _status = '';
-      });
+      setState(() { _playingIndex = -1; _status = ''; });
     });
   }
 
   Future<void> _loadData() async {
     final name = await StorageService.getPatientName();
     final names = await StorageService.getFamilyNames();
-    final paths = await StorageService.getFamilyPaths();
+    final storedFilenames = await StorageService.getFamilyPaths();
 
     final dir = await getApplicationDocumentsDirectory();
+    final paths = storedFilenames.map((stored) {
+      if (stored.isEmpty) return '';
+      final filename = stored.contains('/') ? stored.split('/').last : stored;
+      return '${dir.path}/$filename';
+    }).toList();
+
     final ownPath = '${dir.path}/patient_voice.m4a';
-    final exists = await File(ownPath).exists();
+    final ownExists = await File(ownPath).exists();
 
     if (!mounted) return;
     setState(() {
@@ -62,11 +66,13 @@ class _MainScreenState extends State<MainScreen> {
       _familyNames = names;
       _familyPaths = paths;
       _ownVoicePath = ownPath;
-      _hasOwnRecording = exists;
+      _hasOwnRecording = ownExists;
     });
   }
 
   Future<void> _playFamilyMessage(int index) async {
+    if (_isTalking) return;
+
     final path = _familyPaths[index];
     if (path.isEmpty) {
       setState(() => _status = 'No message recorded yet');
@@ -89,7 +95,6 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> _playOwnVoice() async {
     if (!_hasOwnRecording) return;
-
     await _player.stop();
 
     if (_playingIndex == _ownVoiceIndex) {
@@ -113,21 +118,15 @@ class _MainScreenState extends State<MainScreen> {
     }
 
     await _player.stop();
-    setState(() {
-      _playingIndex = -1;
-      _isTalking = true;
-      _status = 'Speaking…';
-    });
+    setState(() { _playingIndex = -1; _isTalking = true; _status = 'Speaking...'; });
 
     try {
       final prompt = await TtsService.nextPrompt();
       await TtsService.speakAndWait(prompt);
       if (!_isTalking || !mounted) return;
 
-      setState(() => _status = 'I\'m listening… 🎙');
-      final heard = await SpeechService.listen(
-        duration: const Duration(seconds: 12),
-      );
+      setState(() => _status = 'I\'m listening... 🎙');
+      final heard = await SpeechService.listen(duration: const Duration(seconds: 12));
       if (!_isTalking || !mounted) return;
 
       if (heard.trim().isNotEmpty) {
@@ -136,14 +135,11 @@ class _MainScreenState extends State<MainScreen> {
         if (!_isTalking || !mounted) return;
       }
 
-      setState(() => _status = 'Speaking…');
+      setState(() => _status = 'Speaking...');
       final affirmation = await TtsService.nextAffirmation();
       await TtsService.speakAndWait(affirmation);
-
     } finally {
-      if (mounted) {
-        setState(() { _isTalking = false; _status = ''; });
-      }
+      if (mounted) setState(() { _isTalking = false; _status = ''; });
     }
   }
 
@@ -155,9 +151,7 @@ class _MainScreenState extends State<MainScreen> {
         _isRecording = false;
         _hasOwnRecording = saved;
         if (saved) _ownVoicePath = path!;
-        _status = saved
-            ? 'Recording saved — tap Play My Voice to hear it'
-            : 'Nothing recorded';
+        _status = saved ? 'Recording saved — tap Play My Voice to hear it' : 'Nothing recorded';
       });
     } else {
       await _player.stop();
@@ -177,10 +171,7 @@ class _MainScreenState extends State<MainScreen> {
         path: path,
       );
 
-      setState(() {
-        _isRecording = true;
-        _status = 'Recording your voice…';
-      });
+      setState(() { _isRecording = true; _status = 'Recording your voice...'; });
     }
   }
 
@@ -228,10 +219,7 @@ class _MainScreenState extends State<MainScreen> {
                 child: Text(
                   _status,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    color: Color(0xFF2C6FAC),
-                  ),
+                  style: const TextStyle(fontSize: 16, color: Color(0xFF2C6FAC)),
                 ),
               ),
             const SizedBox(height: 32),
@@ -244,10 +232,16 @@ class _MainScreenState extends State<MainScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 24),
                 children: List.generate(4, (i) {
                   final name = _familyNames[i];
-                  return FamilyButton(
-                    name: name.isEmpty ? 'Add Message' : name,
-                    isPlaying: _playingIndex == i,
-                    onPlay: () => _playFamilyMessage(i),
+                  return Opacity(
+                    opacity: _isTalking ? 0.4 : 1.0,
+                    child: IgnorePointer(
+                      ignoring: _isTalking,
+                      child: FamilyButton(
+                        name: name.isEmpty ? 'Add Message' : name,
+                        isPlaying: _playingIndex == i,
+                        onPlay: () => _playFamilyMessage(i),
+                      ),
+                    ),
                   );
                 }),
               ),
@@ -258,9 +252,7 @@ class _MainScreenState extends State<MainScreen> {
               onPressed: _talkToMe,
               icon: _isTalking ? Icons.cancel_outlined : Icons.chat_bubble_outline,
               label: _isTalking ? 'Stop Talking' : 'Talk to Me',
-              color: _isTalking
-                  ? const Color(0xFF3A9E8F)
-                  : const Color(0xFF2C6FAC),
+              color: _isTalking ? const Color(0xFF3A9E8F) : const Color(0xFF2C6FAC),
             ),
             const SizedBox(height: 12),
 
@@ -272,9 +264,7 @@ class _MainScreenState extends State<MainScreen> {
                   : _hasOwnRecording
                   ? 'Re-record My Voice'
                   : 'Record My Voice',
-              color: _isRecording
-                  ? const Color(0xFF3A9E8F)
-                  : const Color(0xFF2C6FAC),
+              color: _isRecording ? const Color(0xFF3A9E8F) : const Color(0xFF2C6FAC),
             ),
             const SizedBox(height: 12),
 
@@ -283,9 +273,7 @@ class _MainScreenState extends State<MainScreen> {
                 onPressed: _playOwnVoice,
                 icon: isPlayingOwnVoice ? Icons.stop_circle : Icons.volume_up,
                 label: isPlayingOwnVoice ? 'Stop' : 'Play My Voice',
-                color: isPlayingOwnVoice
-                    ? const Color(0xFF3A9E8F)
-                    : const Color(0xFF5B8FBF),
+                color: isPlayingOwnVoice ? const Color(0xFF3A9E8F) : const Color(0xFF5B8FBF),
               ),
 
             const SizedBox(height: 24),

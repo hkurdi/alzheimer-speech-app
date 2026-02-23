@@ -20,7 +20,9 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
 
   String _patientName = '';
   List<String> _familyNames = ['', '', '', ''];
-  List<String> _familyPaths = ['', '', '', ''];
+
+  List<String> _familyFilenames = ['', '', '', ''];
+
   int _recordingIndex = -1;
 
   List<bool> _reminderEnabled = List.filled(8, true);
@@ -36,7 +38,8 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
   Future<void> _loadAll() async {
     final name = await StorageService.getPatientName();
     final names = await StorageService.getFamilyNames();
-    final paths = await StorageService.getFamilyPaths();
+    final rawPaths = await StorageService.getFamilyPaths();
+    final filenames = rawPaths.map(_toFilename).toList();
 
     final enabled = <bool>[];
     final hours = <int>[];
@@ -53,7 +56,7 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
       _patientName = name;
       _nameController.text = name;
       _familyNames = names;
-      _familyPaths = paths;
+      _familyFilenames = filenames;
       _reminderEnabled = enabled;
       _reminderHours = hours;
       _reminderMinutes = minutes;
@@ -63,11 +66,16 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
     });
   }
 
+  String _toFilename(String stored) {
+    if (stored.isEmpty) return '';
+    return stored.contains('/') ? stored.split('/').last : stored;
+  }
+
   Future<void> _saveAll() async {
     await StorageService.savePatientName(_nameController.text.trim());
     final names = _familyNameControllers.map((c) => c.text.trim()).toList();
     await StorageService.saveFamilyNames(names);
-    await StorageService.saveFamilyPaths(_familyPaths);
+    await StorageService.saveFamilyPaths(_familyFilenames);
 
     for (int i = 0; i < StorageService.reminderKeys.length; i++) {
       final key = StorageService.reminderKeys[i];
@@ -86,13 +94,10 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
 
   Future<void> _toggleRecording(int index) async {
     if (_recordingIndex == index) {
-      final path = await _recorder.stop();
-      if (path != null) {
-        setState(() {
-          _familyPaths[index] = path;
-          _recordingIndex = -1;
-        });
-      }
+      await _recorder.stop();
+      setState(() {
+        _recordingIndex = -1;
+      });
     } else {
       final hasPermission = await _recorder.hasPermission();
       if (!hasPermission) return;
@@ -102,14 +107,18 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
       }
 
       final dir = await getApplicationDocumentsDirectory();
-      final path = '${dir.path}/family_message_$index.m4a';
+      final filename = 'family_message_$index.m4a';
+      final fullPath = '${dir.path}/$filename';
 
       await _recorder.start(
         const RecordConfig(encoder: AudioEncoder.aacLc),
-        path: path,
+        path: fullPath,
       );
 
-      setState(() => _recordingIndex = index);
+      setState(() {
+        _familyFilenames[index] = filename;
+        _recordingIndex = index;
+      });
     }
   }
 
@@ -163,10 +172,7 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
         children: [
           _sectionTitle('Patient Name'),
           const SizedBox(height: 8),
-          _inputField(
-            controller: _nameController,
-            hint: 'Enter patient name',
-          ),
+          _inputField(controller: _nameController, hint: 'Enter patient name'),
           const SizedBox(height: 24),
           _sectionTitle('Family Messages'),
           const SizedBox(height: 8),
@@ -211,41 +217,38 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
     );
   }
 
-  Widget _sectionTitle(String text) {
-    return Text(
-      text,
-      style: const TextStyle(
-        fontSize: 20,
-        fontWeight: FontWeight.bold,
-        color: Color(0xFF3A3A3A),
-      ),
-    );
-  }
+  Widget _sectionTitle(String text) => Text(
+    text,
+    style: const TextStyle(
+      fontSize: 20,
+      fontWeight: FontWeight.bold,
+      color: Color(0xFF3A3A3A),
+    ),
+  );
 
   Widget _inputField({
     required TextEditingController controller,
     required String hint,
-  }) {
-    return TextField(
-      controller: controller,
-      style: const TextStyle(fontSize: 18),
-      decoration: InputDecoration(
-        hintText: hint,
-        filled: true,
-        fillColor: Colors.white,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
+  }) =>
+      TextField(
+        controller: controller,
+        style: const TextStyle(fontSize: 18),
+        decoration: InputDecoration(
+          hintText: hint,
+          filled: true,
+          fillColor: Colors.white,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
+          contentPadding:
+          const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         ),
-        contentPadding:
-        const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      ),
-    );
-  }
+      );
 
   Widget _familyMessageRow(int index) {
     final isRecording = _recordingIndex == index;
-    final hasRecording = _familyPaths[index].isNotEmpty;
+    final hasRecording = _familyFilenames[index].isNotEmpty;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),

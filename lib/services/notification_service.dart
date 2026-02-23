@@ -11,6 +11,19 @@ class NotificationService {
 
   static bool _initialized = false;
 
+  static const _channelId = 'alzheimer_reminders';
+  static const _androidDetails = AndroidNotificationDetails(
+    _channelId,
+    'Daily Reminders',
+    channelDescription: 'Reminders for daily activities',
+    importance: Importance.max,
+    priority: Priority.high,
+    playSound: true,
+    enableVibration: true,
+  );
+  static const _notificationDetails =
+  NotificationDetails(android: _androidDetails);
+
   static Future<void> init() async {
     if (_initialized) return;
 
@@ -29,6 +42,23 @@ class NotificationService {
       settings: settings,
       onDidReceiveNotificationResponse: _onNotificationTap,
     );
+
+    // Explicitly create the channel so it exists before any notifications
+    // are scheduled — required on Android 8.0+ (API 26+).
+    await _plugin
+        .resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        _channelId,
+        'Daily Reminders',
+        description: 'Reminders for daily activities',
+        importance: Importance.max,
+        playSound: true,
+        enableVibration: true,
+      ),
+    );
+
     _initialized = true;
   }
 
@@ -69,22 +99,11 @@ class NotificationService {
 
   static Future<void> showTestNotification() async {
     await init();
-
-    const androidDetails = AndroidNotificationDetails(
-      'alzheimer_reminders',
-      'Daily Reminders',
-      channelDescription: 'Reminders for daily activities',
-      importance: Importance.max,
-      priority: Priority.high,
-      playSound: true,
-      enableVibration: true,
-    );
-
     await _plugin.show(
-      id: 0,
+      id: 99,
       title: 'Time to take your medication',
       body: 'Tap to hear your reminder',
-      notificationDetails: const NotificationDetails(android: androidDetails),
+      notificationDetails: _notificationDetails,
       payload: 'medication',
     );
   }
@@ -97,35 +116,19 @@ class NotificationService {
     required int minute,
   }) async {
     final now = tz.TZDateTime.now(tz.local);
-    var scheduledDate = tz.TZDateTime(
-      tz.local,
-      now.year,
-      now.month,
-      now.day,
-      hour,
-      minute,
-    );
+    var scheduled = tz.TZDateTime(
+        tz.local, now.year, now.month, now.day, hour, minute);
 
-    if (scheduledDate.isBefore(now)) {
-      scheduledDate = scheduledDate.add(const Duration(days: 1));
+    if (scheduled.isBefore(now)) {
+      scheduled = scheduled.add(const Duration(days: 1));
     }
-
-    const androidDetails = AndroidNotificationDetails(
-      'alzheimer_reminders',
-      'Daily Reminders',
-      channelDescription: 'Reminders for daily activities',
-      importance: Importance.max,
-      priority: Priority.high,
-      playSound: true,
-      enableVibration: true,
-    );
 
     await _plugin.zonedSchedule(
       id: id,
       title: title,
       body: 'Tap to hear your reminder',
-      scheduledDate: scheduledDate,
-      notificationDetails: const NotificationDetails(android: androidDetails),
+      scheduledDate: scheduled,
+      notificationDetails: _notificationDetails,
       androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
       matchDateTimeComponents: DateTimeComponents.time,
       payload: key,
