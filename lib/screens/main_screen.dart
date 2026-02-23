@@ -18,7 +18,7 @@ class MainScreen extends StatefulWidget {
   State<MainScreen> createState() => _MainScreenState();
 }
 
-class _MainScreenState extends State<MainScreen> {
+class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
   final AudioPlayer _player = AudioPlayer();
   final AudioRecorder _recorder = AudioRecorder();
 
@@ -35,11 +35,38 @@ class _MainScreenState extends State<MainScreen> {
   String _status = '';
   int _titleTapCount = 0;
 
+  late AnimationController _pulseController;
+  late Animation<double> _pulseAnim;
+  late AnimationController _fadeController;
+  late Animation<double> _fadeAnim;
+
   static const int _ownVoiceIndex = 4;
+
+  static const _navy = Color(0xFF1E3A5F);
+  static const _coral = Color(0xFFE07B54);
+  static const _warmWhite = Color(0xFFFFFFFF);
+  static const _teal = Color(0xFF3A9E8F);
+  static const _textPrimary = Color(0xFF1A2B3C);
+  static const _textSecondary = Color(0xFF7A8A9A);
 
   @override
   void initState() {
     super.initState();
+
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
+    _pulseAnim = Tween<double>(begin: 0.95, end: 1.05).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+
+    _fadeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
+    _fadeAnim = CurvedAnimation(parent: _fadeController, curve: Curves.easeOut);
+
     _loadData();
     _player.onPlayerComplete.listen((_) {
       if (!mounted) return;
@@ -73,6 +100,8 @@ class _MainScreenState extends State<MainScreen> {
       _ownVoicePath = ownPath;
       _hasOwnRecording = ownExists;
     });
+
+    _fadeController.forward();
   }
 
   String get _greeting {
@@ -80,6 +109,13 @@ class _MainScreenState extends State<MainScreen> {
     if (hour < 12) return 'Good morning';
     if (hour < 17) return 'Good afternoon';
     return 'Good evening';
+  }
+
+  IconData get _greetingIcon {
+    final hour = DateTime.now().hour;
+    if (hour < 12) return Icons.wb_sunny_rounded;
+    if (hour < 17) return Icons.wb_cloudy_rounded;
+    return Icons.nights_stay_rounded;
   }
 
   Future<void> _playFamilyMessage(int index) async {
@@ -95,7 +131,6 @@ class _MainScreenState extends State<MainScreen> {
     }
 
     await _player.stop();
-
     if (_playingIndex == index) {
       setState(() { _playingIndex = -1; _status = ''; });
       return;
@@ -104,45 +139,55 @@ class _MainScreenState extends State<MainScreen> {
     await _player.play(DeviceFileSource(path));
     setState(() {
       _playingIndex = index;
-      _status = 'Playing message from $name';
+      _status = 'Playing message from $name ♪';
     });
   }
 
   void _showEmptyMessageSheet() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (_) => Padding(
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        margin: const EdgeInsets.all(16),
         padding: const EdgeInsets.all(32),
+        decoration: BoxDecoration(
+          color: _warmWhite,
+          borderRadius: BorderRadius.circular(28),
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.mic_none_rounded, size: 48, color: Color(0xFF2C6FAC)),
-            const SizedBox(height: 16),
-            const Text(
-              'No message recorded yet',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF3A3A3A)),
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: _navy.withValues(alpha: 0.08),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.mic_none_rounded, size: 36, color: _navy),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 20),
+            const Text(
+              'No message yet',
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: _textPrimary),
+            ),
+            const SizedBox(height: 10),
             const Text(
               'Ask a family member to open Caregiver Settings and record a personal voice message for you.',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 16, color: Color(0xFF666666), height: 1.5),
+              style: TextStyle(fontSize: 16, color: _textSecondary, height: 1.6),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 28),
             SizedBox(
               width: double.infinity,
-              height: 52,
+              height: 54,
               child: FilledButton(
                 onPressed: () => Navigator.pop(context),
                 style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF2C6FAC),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  backgroundColor: _navy,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 ),
-                child: const Text('OK', style: TextStyle(fontSize: 18)),
+                child: const Text('Got it', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
               ),
             ),
           ],
@@ -174,18 +219,20 @@ class _MainScreenState extends State<MainScreen> {
       await TtsService.stop();
       await SpeechService.stop();
       setState(() { _isTalking = false; _status = ''; });
+      _pulseController.stop();
       return;
     }
 
     await _player.stop();
-    setState(() { _playingIndex = -1; _isTalking = true; _status = 'Speaking...'; });
+    _pulseController.repeat(reverse: true);
+    setState(() { _playingIndex = -1; _isTalking = true; _status = 'Speaking to you...'; });
 
     try {
       final prompt = await TtsService.nextPrompt();
       await TtsService.speakAndWait(prompt);
       if (!_isTalking || !mounted) return;
 
-      setState(() => _status = 'I\'m listening... 🎙');
+      setState(() => _status = 'Listening... 🎙');
       final heard = await SpeechService.listen(duration: const Duration(seconds: 12));
       if (!_isTalking || !mounted) return;
 
@@ -195,11 +242,14 @@ class _MainScreenState extends State<MainScreen> {
         if (!_isTalking || !mounted) return;
       }
 
-      setState(() => _status = 'Speaking...');
+      setState(() => _status = 'Speaking to you...');
       final affirmation = await TtsService.nextAffirmation();
       await TtsService.speakAndWait(affirmation);
     } finally {
-      if (mounted) setState(() { _isTalking = false; _status = ''; });
+      if (mounted) {
+        _pulseController.repeat(reverse: true);
+        setState(() { _isTalking = false; _status = ''; });
+      }
     }
   }
 
@@ -211,28 +261,21 @@ class _MainScreenState extends State<MainScreen> {
       setState(() {
         _isRecording = false;
         _hasOwnRecording = saved;
-        if (saved) _ownVoicePath = path!;
-        _status = saved ? 'Recording saved — tap Play My Voice to hear it' : 'Nothing recorded';
+        if (saved) _ownVoicePath = path;
+        _status = saved ? 'Voice saved ✓' : '';
       });
     } else {
       await _player.stop();
       setState(() { _playingIndex = -1; });
-
       final hasPermission = await _recorder.hasPermission();
       if (!hasPermission) {
         setState(() => _status = 'Microphone permission needed');
         return;
       }
-
       final dir = await getApplicationDocumentsDirectory();
       final path = '${dir.path}/patient_voice.m4a';
-
-      await _recorder.start(
-        const RecordConfig(encoder: AudioEncoder.aacLc),
-        path: path,
-      );
-
-      setState(() { _isRecording = true; _status = 'Recording your voice...'; });
+      await _recorder.start(const RecordConfig(encoder: AudioEncoder.aacLc), path: path);
+      setState(() { _isRecording = true; _status = 'Recording... 🔴'; });
     }
   }
 
@@ -240,13 +283,12 @@ class _MainScreenState extends State<MainScreen> {
     _titleTapCount++;
     if (_titleTapCount < 3) return;
     _titleTapCount = 0;
-
     HapticFeedback.heavyImpact();
+
     final hasPin = await StorageService.hasCaregiverPin();
     if (!mounted) return;
 
     bool granted = false;
-
     if (hasPin) {
       final result = await Navigator.push(
         context,
@@ -265,6 +307,8 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   void dispose() {
+    _pulseController.dispose();
+    _fadeController.dispose();
     _player.dispose();
     _recorder.dispose();
     super.dispose();
@@ -275,102 +319,284 @@ class _MainScreenState extends State<MainScreen> {
     final isPlayingOwnVoice = _playingIndex == _ownVoiceIndex;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFFAF7F2),
-      body: SafeArea(
-        child: Column(
-          children: [
-            const SizedBox(height: 24),
-            GestureDetector(
-              onTap: _onTitleTap,
-              child: Text(
-                '$_greeting, $_patientName',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF3A3A3A),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFFFDF9F5), Color(0xFFF0E8DF), Color(0xFFE8EEF8)],
+            stops: [0.0, 0.5, 1.0],
+          ),
+        ),
+        child: SafeArea(
+          child: FadeTransition(
+            opacity: _fadeAnim,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(28, 28, 28, 0),
+                  child: GestureDetector(
+                    onTap: _onTitleTap,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(_greetingIcon, color: _coral, size: 22),
+                            const SizedBox(width: 8),
+                            Text(
+                              _greeting,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                                color: _coral,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _patientName,
+                          style: const TextStyle(
+                            fontSize: 38,
+                            fontWeight: FontWeight.w800,
+                            color: _navy,
+                            letterSpacing: -0.5,
+                            height: 1.1,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            if (_status.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Text(
-                  _status,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 16, color: Color(0xFF2C6FAC)),
-                ),
-              ),
-            const SizedBox(height: 32),
 
-            Expanded(
-              child: GridView.count(
-                crossAxisCount: 2,
-                mainAxisSpacing: 16,
-                crossAxisSpacing: 16,
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                children: List.generate(4, (i) {
-                  final name = _familyNames[i];
-                  final isEmpty = name.isEmpty || _familyPaths[i].isEmpty;
-                  return Opacity(
-                    opacity: _isTalking ? 0.4 : 1.0,
-                    child: IgnorePointer(
-                      ignoring: _isTalking,
-                      child: FamilyButton(
-                        name: isEmpty ? 'Add Message' : name,
-                        isPlaying: _playingIndex == i,
-                        isEmpty: isEmpty,
-                        onPlay: () => _playFamilyMessage(i),
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  height: _status.isNotEmpty ? 44 : 0,
+                  margin: const EdgeInsets.fromLTRB(28, 12, 28, 0),
+                  child: _status.isNotEmpty
+                      ? AnimatedOpacity(
+                    opacity: _status.isNotEmpty ? 1.0 : 0.0,
+                    duration: const Duration(milliseconds: 200),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      decoration: BoxDecoration(
+                        color: _isTalking
+                            ? _teal.withValues(alpha: 0.12)
+                            : _navy.withValues(alpha: 0.07),
+                        borderRadius: BorderRadius.circular(22),
+                        border: Border.all(
+                          color: _isTalking
+                              ? _teal.withValues(alpha: 0.3)
+                              : _navy.withValues(alpha: 0.12),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          if (_isTalking)
+                            ScaleTransition(
+                              scale: _pulseAnim,
+                              child: Container(
+                                width: 8,
+                                height: 8,
+                                margin: const EdgeInsets.only(right: 10),
+                                decoration: const BoxDecoration(
+                                  color: _teal,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                            ),
+                          Flexible(
+                            child: Text(
+                              _status,
+                              textAlign: TextAlign.center,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: _isTalking ? _teal : _textSecondary,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  );
-                }),
-              ),
+                  )
+                      : const SizedBox(),
+                ),
+
+                const SizedBox(height: 24),
+
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 28),
+                  child: Row(
+                    children: [
+                      Container(width: 4, height: 16, decoration: BoxDecoration(color: _coral, borderRadius: BorderRadius.circular(2))),
+                      const SizedBox(width: 10),
+                      const Text(
+                        'Family Messages',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: _textSecondary, letterSpacing: 1.2),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: GridView.count(
+                      crossAxisCount: 2,
+                      mainAxisSpacing: 14,
+                      crossAxisSpacing: 14,
+                      physics: const NeverScrollableScrollPhysics(),
+                      children: List.generate(4, (i) {
+                        final name = _familyNames[i];
+                        final isEmpty = name.isEmpty || _familyPaths[i].isEmpty;
+                        return Opacity(
+                          opacity: _isTalking ? 0.35 : 1.0,
+                          child: IgnorePointer(
+                            ignoring: _isTalking,
+                            child: FamilyButton(
+                              name: isEmpty ? 'Add Message' : name,
+                              isPlaying: _playingIndex == i,
+                              isEmpty: isEmpty,
+                              onPlay: () => _playFamilyMessage(i),
+                            ),
+                          ),
+                        );
+                      }),
+                    ),
+                  ),
+                ),
+
+                Container(
+                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+                  decoration: BoxDecoration(
+                    color: _warmWhite.withValues(alpha: 0.7),
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: _navy.withValues(alpha: 0.06),
+                        blurRadius: 20,
+                        offset: const Offset(0, -4),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      _PrimaryButton(
+                        onPressed: _talkToMe,
+                        icon: _isTalking ? Icons.cancel_rounded : Icons.chat_bubble_rounded,
+                        label: _isTalking ? 'Stop' : 'Talk to Me',
+                        gradient: _isTalking
+                            ? const LinearGradient(colors: [Color(0xFF3A9E8F), Color(0xFF2E7D6E)])
+                            : const LinearGradient(colors: [Color(0xFF2C5282), Color(0xFF1E3A5F)]),
+                        isActive: _isTalking,
+                        pulseAnim: _isTalking ? _pulseAnim : null,
+                      ),
+                      const SizedBox(height: 10),
+
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _SecondaryButton(
+                              onPressed: _toggleRecording,
+                              icon: _isRecording ? Icons.stop_rounded : Icons.mic_rounded,
+                              label: _isRecording ? 'Stop' : _hasOwnRecording ? 'Re-record' : 'Record Voice',
+                              color: _isRecording ? _teal : _navy,
+                            ),
+                          ),
+                          if (_hasOwnRecording) ...[
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: _SecondaryButton(
+                                onPressed: _playOwnVoice,
+                                icon: isPlayingOwnVoice ? Icons.stop_rounded : Icons.volume_up_rounded,
+                                label: isPlayingOwnVoice ? 'Stop' : 'My Voice',
+                                color: isPlayingOwnVoice ? _teal : const Color(0xFF5B7FA6),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
-
-            _ActionButton(
-              onPressed: _talkToMe,
-              icon: _isTalking ? Icons.cancel_outlined : Icons.chat_bubble_outline,
-              label: _isTalking ? 'Stop Talking' : 'Talk to Me',
-              color: _isTalking ? const Color(0xFF3A9E8F) : const Color(0xFF2C6FAC),
-            ),
-            const SizedBox(height: 12),
-
-            _ActionButton(
-              onPressed: _toggleRecording,
-              icon: _isRecording ? Icons.stop_circle : Icons.mic,
-              label: _isRecording
-                  ? 'Stop Recording'
-                  : _hasOwnRecording ? 'Re-record My Voice' : 'Record My Voice',
-              color: _isRecording ? const Color(0xFF3A9E8F) : const Color(0xFF2C6FAC),
-            ),
-            const SizedBox(height: 12),
-
-            if (_hasOwnRecording)
-              _ActionButton(
-                onPressed: _playOwnVoice,
-                icon: isPlayingOwnVoice ? Icons.stop_circle : Icons.volume_up,
-                label: isPlayingOwnVoice ? 'Stop' : 'Play My Voice',
-                color: isPlayingOwnVoice ? const Color(0xFF3A9E8F) : const Color(0xFF5B8FBF),
-              ),
-
-            const SizedBox(height: 24),
-          ],
+          ),
         ),
       ),
     );
   }
 }
 
-class _ActionButton extends StatelessWidget {
+class _PrimaryButton extends StatelessWidget {
+  final VoidCallback onPressed;
+  final IconData icon;
+  final String label;
+  final Gradient gradient;
+  final bool isActive;
+  final Animation<double>? pulseAnim;
+
+  const _PrimaryButton({
+    required this.onPressed,
+    required this.icon,
+    required this.label,
+    required this.gradient,
+    this.isActive = false,
+    this.pulseAnim,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    Widget button = GestureDetector(
+      onTap: onPressed,
+      child: Container(
+        height: 68,
+        decoration: BoxDecoration(
+          gradient: gradient,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: (isActive ? const Color(0xFF3A9E8F) : const Color(0xFF1E3A5F)).withValues(alpha: 0.35),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: Colors.white, size: 28),
+            const SizedBox(width: 12),
+            Text(
+              label,
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: Colors.white, letterSpacing: -0.2),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (pulseAnim != null) {
+      return ScaleTransition(scale: pulseAnim!, child: button);
+    }
+    return button;
+  }
+}
+
+class _SecondaryButton extends StatelessWidget {
   final VoidCallback onPressed;
   final IconData icon;
   final String label;
   final Color color;
 
-  const _ActionButton({
+  const _SecondaryButton({
     required this.onPressed,
     required this.icon,
     required this.label,
@@ -379,19 +605,28 @@ class _ActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      child: SizedBox(
-        width: double.infinity,
-        height: 64,
-        child: FilledButton.icon(
-          onPressed: onPressed,
-          icon: Icon(icon, size: 28),
-          label: Text(label, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-          style: FilledButton.styleFrom(
-            backgroundColor: color,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          ),
+    return GestureDetector(
+      onTap: onPressed,
+      child: Container(
+        height: 56,
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withValues(alpha: 0.25), width: 1.5),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: color, size: 22),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                label,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: color),
+              ),
+            ),
+          ],
         ),
       ),
     );
