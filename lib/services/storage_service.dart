@@ -7,6 +7,33 @@ class StorageService {
   static const _keyReminderEnabled = 'reminder_enabled_';
   static const _keyReminderHour = 'reminder_hour_';
   static const _keyReminderMinute = 'reminder_minute_';
+  static const _keyOnboardingComplete = 'onboarding_complete';
+  static const _keyCaregiverPin = 'caregiver_pin';
+
+  static Future<bool> isOnboardingComplete() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyOnboardingComplete) ?? false;
+  }
+
+  static Future<void> setOnboardingComplete() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyOnboardingComplete, true);
+  }
+
+  static Future<String?> getCaregiverPin() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_keyCaregiverPin);
+  }
+
+  static Future<void> saveCaregiverPin(String pin) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyCaregiverPin, pin);
+  }
+
+  static Future<bool> hasCaregiverPin() async {
+    final pin = await getCaregiverPin();
+    return pin != null && pin.isNotEmpty;
+  }
 
   static Future<String> getPatientName() async {
     final prefs = await SharedPreferences.getInstance();
@@ -43,36 +70,29 @@ class StorageService {
   }
 
   static const List<String> reminderKeys = [
-    'medication',
-    'breakfast',
-    'lunch',
-    'dinner',
-    'hydration',
-    'exercise',
-    'family_call',
-    'bedtime',
+    'medication','breakfast','lunch','dinner','hydration','exercise','family_call','bedtime',
   ];
 
   static const Map<String, String> reminderLabels = {
-    'medication':   'Take your medication',
-    'breakfast':    'Time for breakfast',
-    'lunch':        'Time for lunch',
-    'dinner':       'Time for dinner',
-    'hydration':    'Time to drink some water',
-    'exercise':     'Time for a short walk',
-    'family_call':  'Call your family',
-    'bedtime':      'Time to get ready for bed',
+    'medication':  'Take your medication',
+    'breakfast':   'Time for breakfast',
+    'lunch':       'Time for lunch',
+    'dinner':      'Time for dinner',
+    'hydration':   'Time to drink some water',
+    'exercise':    'Time for a short walk',
+    'family_call': 'Call your family',
+    'bedtime':     'Time to get ready for bed',
   };
 
   static const Map<String, List<int>> reminderDefaults = {
-    'medication':   [8, 0],
-    'breakfast':    [8, 30],
-    'lunch':        [12, 0],
-    'dinner':       [18, 0],
-    'hydration':    [10, 0],
-    'exercise':     [9, 0],
-    'family_call':  [15, 0],
-    'bedtime':      [21, 0],
+    'medication':  [8, 0],
+    'breakfast':   [8, 30],
+    'lunch':       [12, 0],
+    'dinner':      [18, 0],
+    'hydration':   [10, 0],
+    'exercise':    [9, 0],
+    'family_call': [15, 0],
+    'bedtime':     [21, 0],
   };
 
   static Future<bool> getReminderEnabled(String key) async {

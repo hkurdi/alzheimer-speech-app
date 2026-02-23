@@ -3,6 +3,7 @@ import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 import '../services/storage_service.dart';
 import '../services/notification_service.dart';
+import '../screens/pin_screen.dart';
 import '../widgets/reminder_tile.dart';
 
 class CaregiverScreen extends StatefulWidget {
@@ -20,14 +21,14 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
 
   String _patientName = '';
   List<String> _familyNames = ['', '', '', ''];
-
   List<String> _familyFilenames = ['', '', '', ''];
-
   int _recordingIndex = -1;
 
   List<bool> _reminderEnabled = List.filled(8, true);
   List<int> _reminderHours = List.filled(8, 8);
   List<int> _reminderMinutes = List.filled(8, 0);
+
+  bool _hasPin = false;
 
   @override
   void initState() {
@@ -40,6 +41,7 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
     final names = await StorageService.getFamilyNames();
     final rawPaths = await StorageService.getFamilyPaths();
     final filenames = rawPaths.map(_toFilename).toList();
+    final hasPin = await StorageService.hasCaregiverPin();
 
     final enabled = <bool>[];
     final hours = <int>[];
@@ -60,6 +62,7 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
       _reminderEnabled = enabled;
       _reminderHours = hours;
       _reminderMinutes = minutes;
+      _hasPin = hasPin;
       for (int i = 0; i < 4; i++) {
         _familyNameControllers[i].text = names[i];
       }
@@ -80,8 +83,7 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
     for (int i = 0; i < StorageService.reminderKeys.length; i++) {
       final key = StorageService.reminderKeys[i];
       await StorageService.saveReminderEnabled(key, _reminderEnabled[i]);
-      await StorageService.saveReminderTime(
-          key, _reminderHours[i], _reminderMinutes[i]);
+      await StorageService.saveReminderTime(key, _reminderHours[i], _reminderMinutes[i]);
     }
 
     await NotificationService.scheduleAll();
@@ -92,49 +94,68 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
     );
   }
 
+  Future<void> _setupPin() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const PinScreen(mode: PinMode.setup)),
+    );
+    if (result == true && mounted) {
+      setState(() => _hasPin = true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('PIN set successfully')),
+      );
+    }
+  }
+
+  Future<void> _removePin() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Remove PIN?'),
+        content: const Text('The caregiver settings will be accessible without a PIN.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Remove', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await StorageService.saveCaregiverPin('');
+      if (!mounted) return;
+      setState(() => _hasPin = false);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('PIN removed')));
+    }
+  }
+
   Future<void> _toggleRecording(int index) async {
     if (_recordingIndex == index) {
       await _recorder.stop();
-      setState(() {
-        _recordingIndex = -1;
-      });
+      setState(() => _recordingIndex = -1);
     } else {
       final hasPermission = await _recorder.hasPermission();
       if (!hasPermission) return;
-
-      if (_recordingIndex != -1) {
-        await _recorder.stop();
-      }
+      if (_recordingIndex != -1) await _recorder.stop();
 
       final dir = await getApplicationDocumentsDirectory();
       final filename = 'family_message_$index.m4a';
       final fullPath = '${dir.path}/$filename';
 
-      await _recorder.start(
-        const RecordConfig(encoder: AudioEncoder.aacLc),
-        path: fullPath,
-      );
-
-      setState(() {
-        _familyFilenames[index] = filename;
-        _recordingIndex = index;
-      });
+      await _recorder.start(const RecordConfig(encoder: AudioEncoder.aacLc), path: fullPath);
+      setState(() { _familyFilenames[index] = filename; _recordingIndex = index; });
     }
   }
 
   Future<void> _pickTime(int index) async {
     final picked = await showTimePicker(
       context: context,
-      initialTime: TimeOfDay(
-        hour: _reminderHours[index],
-        minute: _reminderMinutes[index],
-      ),
+      initialTime: TimeOfDay(hour: _reminderHours[index], minute: _reminderMinutes[index]),
     );
     if (picked != null) {
-      setState(() {
-        _reminderHours[index] = picked.hour;
-        _reminderMinutes[index] = picked.minute;
-      });
+      setState(() { _reminderHours[index] = picked.hour; _reminderMinutes[index] = picked.minute; });
     }
   }
 
@@ -142,9 +163,7 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
   void dispose() {
     _recorder.dispose();
     _nameController.dispose();
-    for (final c in _familyNameControllers) {
-      c.dispose();
-    }
+    for (final c in _familyNameControllers) c.dispose();
     super.dispose();
   }
 
@@ -155,17 +174,8 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF2C6FAC),
         foregroundColor: Colors.white,
-        title: const Text(
-          'Caregiver Settings',
-          style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.save),
-            onPressed: _saveAll,
-            tooltip: 'Save',
-          ),
-        ],
+        title: const Text('Caregiver Settings', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+        actions: [IconButton(icon: const Icon(Icons.save), onPressed: _saveAll, tooltip: 'Save')],
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
@@ -192,6 +202,42 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
               onEditTime: () => _pickTime(i),
             );
           }),
+          const SizedBox(height: 24),
+          _sectionTitle('Security'),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.07), blurRadius: 6, offset: const Offset(0, 3))],
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.lock_outline, color: Color(0xFF2C6FAC), size: 28),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Caregiver PIN', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xFF3A3A3A))),
+                      Text(
+                        _hasPin ? 'PIN is set — settings are locked' : 'No PIN — anyone can open settings',
+                        style: TextStyle(fontSize: 14, color: _hasPin ? Colors.green[700] : Colors.orange[700]),
+                      ),
+                    ],
+                  ),
+                ),
+                TextButton(
+                  onPressed: _hasPin ? _removePin : _setupPin,
+                  child: Text(
+                    _hasPin ? 'Remove' : 'Set PIN',
+                    style: TextStyle(color: _hasPin ? Colors.red : const Color(0xFF2C6FAC), fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+          ),
           const SizedBox(height: 32),
           SizedBox(
             width: double.infinity,
@@ -199,15 +245,10 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
             child: FilledButton.icon(
               onPressed: _saveAll,
               icon: const Icon(Icons.save, size: 26),
-              label: const Text(
-                'Save All Settings',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
+              label: const Text('Save All Settings', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
               style: FilledButton.styleFrom(
                 backgroundColor: const Color(0xFF2C6FAC),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               ),
             ),
           ),
@@ -217,19 +258,9 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
     );
   }
 
-  Widget _sectionTitle(String text) => Text(
-    text,
-    style: const TextStyle(
-      fontSize: 20,
-      fontWeight: FontWeight.bold,
-      color: Color(0xFF3A3A3A),
-    ),
-  );
+  Widget _sectionTitle(String text) => Text(text, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF3A3A3A)));
 
-  Widget _inputField({
-    required TextEditingController controller,
-    required String hint,
-  }) =>
+  Widget _inputField({required TextEditingController controller, required String hint}) =>
       TextField(
         controller: controller,
         style: const TextStyle(fontSize: 18),
@@ -237,49 +268,28 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
           hintText: hint,
           filled: true,
           fillColor: Colors.white,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide.none,
-          ),
-          contentPadding:
-          const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         ),
       );
 
   Widget _familyMessageRow(int index) {
     final isRecording = _recordingIndex == index;
     final hasRecording = _familyFilenames[index].isNotEmpty;
-
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.07),
-            blurRadius: 6,
-            offset: const Offset(0, 3),
-          ),
-        ],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.07), blurRadius: 6, offset: const Offset(0, 3))],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Message ${index + 1}',
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF3A3A3A),
-            ),
-          ),
+          Text('Message ${index + 1}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF3A3A3A))),
           const SizedBox(height: 8),
-          _inputField(
-            controller: _familyNameControllers[index],
-            hint: 'Name (e.g. Mom, Sarah)',
-          ),
+          _inputField(controller: _familyNameControllers[index], hint: 'Name (e.g. Mom, Sarah)'),
           const SizedBox(height: 10),
           SizedBox(
             width: double.infinity,
@@ -288,20 +298,12 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
               onPressed: () => _toggleRecording(index),
               icon: Icon(isRecording ? Icons.stop : Icons.mic),
               label: Text(
-                isRecording
-                    ? 'Stop Recording'
-                    : hasRecording
-                    ? 'Re-record Message'
-                    : 'Record Message',
+                isRecording ? 'Stop Recording' : hasRecording ? 'Re-record Message' : 'Record Message',
                 style: const TextStyle(fontSize: 16),
               ),
               style: FilledButton.styleFrom(
-                backgroundColor: isRecording
-                    ? const Color(0xFF3A9E8F)
-                    : const Color(0xFF2C6FAC),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                backgroundColor: isRecording ? const Color(0xFF3A9E8F) : const Color(0xFF2C6FAC),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
             ),
           ),

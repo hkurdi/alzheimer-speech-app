@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import '../services/storage_service.dart';
 import '../services/tts_service.dart';
 import '../services/speech_service.dart';
+import '../screens/pin_screen.dart';
 import '../widgets/family_button.dart';
 
 class MainScreen extends StatefulWidget {
@@ -21,7 +22,6 @@ class _MainScreenState extends State<MainScreen> {
 
   String _patientName = 'Friend';
   List<String> _familyNames = ['', '', '', ''];
-
   List<String> _familyPaths = ['', '', '', ''];
 
   int _playingIndex = -1;
@@ -70,12 +70,21 @@ class _MainScreenState extends State<MainScreen> {
     });
   }
 
+  String get _greeting {
+    final hour = DateTime.now().hour;
+    if (hour < 12) return 'Good morning';
+    if (hour < 17) return 'Good afternoon';
+    return 'Good evening';
+  }
+
   Future<void> _playFamilyMessage(int index) async {
     if (_isTalking) return;
 
     final path = _familyPaths[index];
-    if (path.isEmpty) {
-      setState(() => _status = 'No message recorded yet');
+    final name = _familyNames[index];
+
+    if (path.isEmpty || name.isEmpty) {
+      _showEmptyMessageSheet();
       return;
     }
 
@@ -89,8 +98,57 @@ class _MainScreenState extends State<MainScreen> {
     await _player.play(DeviceFileSource(path));
     setState(() {
       _playingIndex = index;
-      _status = 'Playing message from ${_familyNames[index]}';
+      _status = 'Playing message from $name';
     });
+  }
+
+  void _showEmptyMessageSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.mic_none_rounded, size: 48, color: Color(0xFF2C6FAC)),
+            const SizedBox(height: 16),
+            const Text(
+              'No message recorded yet',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF3A3A3A),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Ask a family member to open Caregiver Settings and record a personal voice message for you.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 16, color: Color(0xFF666666), height: 1.5),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: FilledButton(
+                onPressed: () => Navigator.pop(context),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF2C6FAC),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                child: const Text('OK', style: TextStyle(fontSize: 18)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _playOwnVoice() async {
@@ -151,7 +209,9 @@ class _MainScreenState extends State<MainScreen> {
         _isRecording = false;
         _hasOwnRecording = saved;
         if (saved) _ownVoicePath = path!;
-        _status = saved ? 'Recording saved — tap Play My Voice to hear it' : 'Nothing recorded';
+        _status = saved
+            ? 'Recording saved — tap Play My Voice to hear it'
+            : 'Nothing recorded';
       });
     } else {
       await _player.stop();
@@ -175,11 +235,29 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
-  void _onTitleTap() {
+  Future<void> _onTitleTap() async {
     _titleTapCount++;
-    if (_titleTapCount >= 3) {
-      _titleTapCount = 0;
-      Navigator.pushNamed(context, '/caregiver').then((_) => _loadData());
+    if (_titleTapCount < 3) return;
+    _titleTapCount = 0;
+
+    final hasPin = await StorageService.hasCaregiverPin();
+    if (!mounted) return;
+
+    bool granted = false;
+
+    if (hasPin) {
+      final result = await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const PinScreen(mode: PinMode.verify)),
+      );
+      granted = result == true;
+    } else {
+      granted = true;
+    }
+
+    if (granted && mounted) {
+      await Navigator.pushNamed(context, '/caregiver');
+      _loadData();
     }
   }
 
@@ -203,7 +281,7 @@ class _MainScreenState extends State<MainScreen> {
             GestureDetector(
               onTap: _onTitleTap,
               child: Text(
-                'Hello, $_patientName',
+                '$_greeting, $_patientName',
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   fontSize: 28,
@@ -232,13 +310,15 @@ class _MainScreenState extends State<MainScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 24),
                 children: List.generate(4, (i) {
                   final name = _familyNames[i];
+                  final isEmpty = name.isEmpty || _familyPaths[i].isEmpty;
                   return Opacity(
                     opacity: _isTalking ? 0.4 : 1.0,
                     child: IgnorePointer(
                       ignoring: _isTalking,
                       child: FamilyButton(
-                        name: name.isEmpty ? 'Add Message' : name,
+                        name: isEmpty ? 'Add Message' : name,
                         isPlaying: _playingIndex == i,
+                        isEmpty: isEmpty,
                         onPlay: () => _playFamilyMessage(i),
                       ),
                     ),
@@ -273,7 +353,9 @@ class _MainScreenState extends State<MainScreen> {
                 onPressed: _playOwnVoice,
                 icon: isPlayingOwnVoice ? Icons.stop_circle : Icons.volume_up,
                 label: isPlayingOwnVoice ? 'Stop' : 'Play My Voice',
-                color: isPlayingOwnVoice ? const Color(0xFF3A9E8F) : const Color(0xFF5B8FBF),
+                color: isPlayingOwnVoice
+                    ? const Color(0xFF3A9E8F)
+                    : const Color(0xFF5B8FBF),
               ),
 
             const SizedBox(height: 24),
