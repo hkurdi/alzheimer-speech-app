@@ -1,11 +1,13 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 import '../services/storage_service.dart';
 import '../services/tts_service.dart';
 import '../services/speech_service.dart';
+import '../services/notification_service.dart';
 import '../screens/pin_screen.dart';
 import '../widgets/family_button.dart';
 
@@ -43,6 +45,9 @@ class _MainScreenState extends State<MainScreen> {
       if (!mounted) return;
       setState(() { _playingIndex = -1; _status = ''; });
     });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      NotificationService.flushPendingPayload();
+    });
   }
 
   Future<void> _loadData() async {
@@ -79,6 +84,7 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> _playFamilyMessage(int index) async {
     if (_isTalking) return;
+    HapticFeedback.mediumImpact();
 
     final path = _familyPaths[index];
     final name = _familyNames[index];
@@ -118,11 +124,7 @@ class _MainScreenState extends State<MainScreen> {
             const SizedBox(height: 16),
             const Text(
               'No message recorded yet',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF3A3A3A),
-              ),
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF3A3A3A)),
             ),
             const SizedBox(height: 12),
             const Text(
@@ -138,9 +140,7 @@ class _MainScreenState extends State<MainScreen> {
                 onPressed: () => Navigator.pop(context),
                 style: FilledButton.styleFrom(
                   backgroundColor: const Color(0xFF2C6FAC),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                 ),
                 child: const Text('OK', style: TextStyle(fontSize: 18)),
               ),
@@ -153,6 +153,7 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> _playOwnVoice() async {
     if (!_hasOwnRecording) return;
+    HapticFeedback.mediumImpact();
     await _player.stop();
 
     if (_playingIndex == _ownVoiceIndex) {
@@ -168,6 +169,7 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Future<void> _talkToMe() async {
+    HapticFeedback.mediumImpact();
     if (_isTalking) {
       await TtsService.stop();
       await SpeechService.stop();
@@ -202,6 +204,7 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Future<void> _toggleRecording() async {
+    HapticFeedback.mediumImpact();
     if (_isRecording) {
       final path = await _recorder.stop();
       final saved = path != null && await File(path).exists();
@@ -209,9 +212,7 @@ class _MainScreenState extends State<MainScreen> {
         _isRecording = false;
         _hasOwnRecording = saved;
         if (saved) _ownVoicePath = path!;
-        _status = saved
-            ? 'Recording saved — tap Play My Voice to hear it'
-            : 'Nothing recorded';
+        _status = saved ? 'Recording saved — tap Play My Voice to hear it' : 'Nothing recorded';
       });
     } else {
       await _player.stop();
@@ -240,6 +241,7 @@ class _MainScreenState extends State<MainScreen> {
     if (_titleTapCount < 3) return;
     _titleTapCount = 0;
 
+    HapticFeedback.heavyImpact();
     final hasPin = await StorageService.hasCaregiverPin();
     if (!mounted) return;
 
@@ -341,9 +343,7 @@ class _MainScreenState extends State<MainScreen> {
               icon: _isRecording ? Icons.stop_circle : Icons.mic,
               label: _isRecording
                   ? 'Stop Recording'
-                  : _hasOwnRecording
-                  ? 'Re-record My Voice'
-                  : 'Record My Voice',
+                  : _hasOwnRecording ? 'Re-record My Voice' : 'Record My Voice',
               color: _isRecording ? const Color(0xFF3A9E8F) : const Color(0xFF2C6FAC),
             ),
             const SizedBox(height: 12),
@@ -353,9 +353,7 @@ class _MainScreenState extends State<MainScreen> {
                 onPressed: _playOwnVoice,
                 icon: isPlayingOwnVoice ? Icons.stop_circle : Icons.volume_up,
                 label: isPlayingOwnVoice ? 'Stop' : 'Play My Voice',
-                color: isPlayingOwnVoice
-                    ? const Color(0xFF3A9E8F)
-                    : const Color(0xFF5B8FBF),
+                color: isPlayingOwnVoice ? const Color(0xFF3A9E8F) : const Color(0xFF5B8FBF),
               ),
 
             const SizedBox(height: 24),
@@ -389,15 +387,10 @@ class _ActionButton extends StatelessWidget {
         child: FilledButton.icon(
           onPressed: onPressed,
           icon: Icon(icon, size: 28),
-          label: Text(
-            label,
-            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-          ),
+          label: Text(label, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
           style: FilledButton.styleFrom(
             backgroundColor: color,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           ),
         ),
       ),

@@ -53,7 +53,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   Future<void> _finish() async {
     await StorageService.setOnboardingComplete();
     if (!mounted) return;
-    Navigator.of(context).pushReplacementNamed('/');
+    Navigator.of(context).pushReplacementNamed('/main');
   }
 
   @override

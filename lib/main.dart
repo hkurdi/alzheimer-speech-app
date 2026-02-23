@@ -12,50 +12,11 @@ void main() async {
   runApp(const AlzheimerSpeechApp());
 }
 
-class AlzheimerSpeechApp extends StatefulWidget {
+class AlzheimerSpeechApp extends StatelessWidget {
   const AlzheimerSpeechApp({super.key});
 
   @override
-  State<AlzheimerSpeechApp> createState() => _AlzheimerSpeechAppState();
-}
-
-class _AlzheimerSpeechAppState extends State<AlzheimerSpeechApp> {
-  String? _initialRoute;
-
-  @override
-  void initState() {
-    super.initState();
-    _requestPermissions();
-    _resolveInitialRoute();
-  }
-
-  Future<void> _requestPermissions() async {
-    await [
-      Permission.microphone,
-      Permission.notification,
-    ].request();
-    await NotificationService.scheduleAll();
-  }
-
-  Future<void> _resolveInitialRoute() async {
-    final done = await StorageService.isOnboardingComplete();
-    setState(() => _initialRoute = done ? '/' : '/onboarding');
-  }
-
-  @override
   Widget build(BuildContext context) {
-    if (_initialRoute == null) {
-      return const MaterialApp(
-        debugShowCheckedModeBanner: false,
-        home: Scaffold(
-          backgroundColor: Color(0xFFFAF7F2),
-          body: Center(
-            child: CircularProgressIndicator(color: Color(0xFF2C6FAC)),
-          ),
-        ),
-      );
-    }
-
     return MaterialApp(
       title: 'Alzheimer Speech App',
       debugShowCheckedModeBanner: false,
@@ -64,12 +25,54 @@ class _AlzheimerSpeechAppState extends State<AlzheimerSpeechApp> {
         scaffoldBackgroundColor: const Color(0xFFFAF7F2),
         useMaterial3: true,
       ),
-      initialRoute: _initialRoute,
       routes: {
-        '/': (context) => const MainScreen(),
+        '/': (context) => const _AppEntry(),
+        '/main': (context) => const MainScreen(),
         '/onboarding': (context) => const OnboardingScreen(),
         '/caregiver': (context) => const CaregiverScreen(),
       },
+    );
+  }
+}
+
+class _AppEntry extends StatefulWidget {
+  const _AppEntry();
+
+  @override
+  State<_AppEntry> createState() => _AppEntryState();
+}
+
+class _AppEntryState extends State<_AppEntry> {
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  Future<void> _init() async {
+    await [
+      Permission.microphone,
+      Permission.notification,
+    ].request();
+    await NotificationService.scheduleAll();
+
+    if (!mounted) return;
+    final done = await StorageService.isOnboardingComplete();
+    if (!mounted) return;
+
+    Navigator.pushReplacementNamed(
+      context,
+      done ? '/main' : '/onboarding',
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      backgroundColor: Color(0xFFFAF7F2),
+      body: Center(
+        child: CircularProgressIndicator(color: Color(0xFF2C6FAC)),
+      ),
     );
   }
 }

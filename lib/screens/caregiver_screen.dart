@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:record/record.dart';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
 import '../services/storage_service.dart';
 import '../services/notification_service.dart';
@@ -15,6 +17,7 @@ class CaregiverScreen extends StatefulWidget {
 
 class _CaregiverScreenState extends State<CaregiverScreen> {
   final AudioRecorder _recorder = AudioRecorder();
+  final AudioPlayer _player = AudioPlayer();
   final TextEditingController _nameController = TextEditingController();
   final List<TextEditingController> _familyNameControllers =
   List.generate(4, (_) => TextEditingController());
@@ -23,6 +26,7 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
   List<String> _familyNames = ['', '', '', ''];
   List<String> _familyFilenames = ['', '', '', ''];
   int _recordingIndex = -1;
+  int _playingIndex = -1;
 
   List<bool> _reminderEnabled = List.filled(8, true);
   List<int> _reminderHours = List.filled(8, 8);
@@ -34,6 +38,10 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
   void initState() {
     super.initState();
     _loadAll();
+    _player.onPlayerComplete.listen((_) {
+      if (!mounted) return;
+      setState(() => _playingIndex = -1);
+    });
   }
 
   Future<void> _loadAll() async {
@@ -132,6 +140,12 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
   }
 
   Future<void> _toggleRecording(int index) async {
+    HapticFeedback.mediumImpact();
+    if (_playingIndex != -1) {
+      await _player.stop();
+      setState(() => _playingIndex = -1);
+    }
+
     if (_recordingIndex == index) {
       await _recorder.stop();
       setState(() => _recordingIndex = -1);
@@ -149,6 +163,30 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
     }
   }
 
+  Future<void> _togglePreview(int index) async {
+    HapticFeedback.lightImpact();
+    final filename = _familyFilenames[index];
+    if (filename.isEmpty) return;
+
+    if (_recordingIndex != -1) {
+      await _recorder.stop();
+      setState(() => _recordingIndex = -1);
+    }
+
+    await _player.stop();
+
+    if (_playingIndex == index) {
+      setState(() => _playingIndex = -1);
+      return;
+    }
+
+    final dir = await getApplicationDocumentsDirectory();
+    final fullPath = '${dir.path}/$filename';
+
+    await _player.play(DeviceFileSource(fullPath));
+    setState(() => _playingIndex = index);
+  }
+
   Future<void> _pickTime(int index) async {
     final picked = await showTimePicker(
       context: context,
@@ -162,6 +200,7 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
   @override
   void dispose() {
     _recorder.dispose();
+    _player.dispose();
     _nameController.dispose();
     for (final c in _familyNameControllers) c.dispose();
     super.dispose();
@@ -258,7 +297,8 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
     );
   }
 
-  Widget _sectionTitle(String text) => Text(text, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF3A3A3A)));
+  Widget _sectionTitle(String text) => Text(text,
+      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF3A3A3A)));
 
   Widget _inputField({required TextEditingController controller, required String hint}) =>
       TextField(
@@ -275,7 +315,9 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
 
   Widget _familyMessageRow(int index) {
     final isRecording = _recordingIndex == index;
+    final isPlaying = _playingIndex == index;
     final hasRecording = _familyFilenames[index].isNotEmpty;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
@@ -287,25 +329,47 @@ class _CaregiverScreenState extends State<CaregiverScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Message ${index + 1}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF3A3A3A))),
+          Text('Message ${index + 1}',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF3A3A3A))),
           const SizedBox(height: 8),
           _inputField(controller: _familyNameControllers[index], hint: 'Name (e.g. Mom, Sarah)'),
           const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: FilledButton.icon(
-              onPressed: () => _toggleRecording(index),
-              icon: Icon(isRecording ? Icons.stop : Icons.mic),
-              label: Text(
-                isRecording ? 'Stop Recording' : hasRecording ? 'Re-record Message' : 'Record Message',
-                style: const TextStyle(fontSize: 16),
+          Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 52,
+                  child: FilledButton.icon(
+                    onPressed: () => _toggleRecording(index),
+                    icon: Icon(isRecording ? Icons.stop : Icons.mic),
+                    label: Text(
+                      isRecording ? 'Stop' : hasRecording ? 'Re-record' : 'Record',
+                      style: const TextStyle(fontSize: 15),
+                    ),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: isRecording ? const Color(0xFF3A9E8F) : const Color(0xFF2C6FAC),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ),
               ),
-              style: FilledButton.styleFrom(
-                backgroundColor: isRecording ? const Color(0xFF3A9E8F) : const Color(0xFF2C6FAC),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-            ),
+              if (hasRecording) ...[
+                const SizedBox(width: 10),
+                SizedBox(
+                  height: 52,
+                  width: 52,
+                  child: FilledButton(
+                    onPressed: () => _togglePreview(index),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: isPlaying ? const Color(0xFF3A9E8F) : const Color(0xFF5B8FBF),
+                      padding: EdgeInsets.zero,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: Icon(isPlaying ? Icons.stop : Icons.play_arrow, size: 26),
+                  ),
+                ),
+              ],
+            ],
           ),
         ],
       ),

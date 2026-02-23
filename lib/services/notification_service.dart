@@ -11,6 +11,8 @@ class NotificationService {
 
   static bool _initialized = false;
 
+  static String? _pendingPayload;
+
   static const _channelId = 'alzheimer_reminders';
   static const _androidDetails = AndroidNotificationDetails(
     _channelId,
@@ -28,8 +30,8 @@ class NotificationService {
     if (_initialized) return;
 
     tzdata.initializeTimeZones();
-    final TimezoneInfo currentTimeZone = await FlutterTimezone.getLocalTimezone();
-    tz.setLocalLocation(tz.getLocation(currentTimeZone.identifier));
+    final TimezoneInfo tz0 = await FlutterTimezone.getLocalTimezone();
+    tz.setLocalLocation(tz.getLocation(tz0.identifier));
 
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
     const settings = InitializationSettings(android: android);
@@ -39,8 +41,6 @@ class NotificationService {
       onDidReceiveNotificationResponse: _onNotificationTap,
     );
 
-    // Explicitly create the channel so it exists before any notifications
-    // are scheduled — required on Android 8.0+ (API 26+).
     await _plugin
         .resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>()
@@ -55,12 +55,32 @@ class NotificationService {
       ),
     );
 
+    final launchDetails = await _plugin.getNotificationAppLaunchDetails();
+    if (launchDetails?.didNotificationLaunchApp == true) {
+      final payload = launchDetails?.notificationResponse?.payload;
+      if (payload != null && payload.isNotEmpty) {
+        _pendingPayload = payload;
+      }
+    }
+
     _initialized = true;
+  }
+
+  static Future<void> flushPendingPayload() async {
+    if (_pendingPayload != null) {
+      final payload = _pendingPayload!;
+      _pendingPayload = null;
+      await TtsService.speakReminder(payload);
+    }
   }
 
   static void _onNotificationTap(NotificationResponse response) {
     final String? key = response.payload;
-    if (key != null && key.isNotEmpty) {
+    if (key == null || key.isEmpty) return;
+
+    if (!_initialized) {
+      _pendingPayload = key;
+    } else {
       TtsService.speakReminder(key);
     }
   }
@@ -78,13 +98,7 @@ class NotificationService {
       final minute = await StorageService.getReminderMinute(key);
       final label = StorageService.reminderLabels[key] ?? 'Reminder';
 
-      await _scheduleDaily(
-        id: i,
-        key: key,
-        title: label,
-        hour: hour,
-        minute: minute,
-      );
+      await _scheduleDaily(id: i, key: key, title: label, hour: hour, minute: minute);
     }
   }
 
@@ -112,9 +126,7 @@ class NotificationService {
     required int minute,
   }) async {
     final now = tz.TZDateTime.now(tz.local);
-    var scheduled = tz.TZDateTime(
-        tz.local, now.year, now.month, now.day, hour, minute);
-
+    var scheduled = tz.TZDateTime(tz.local, now.year, now.month, now.day, hour, minute);
     if (scheduled.isBefore(now)) {
       scheduled = scheduled.add(const Duration(days: 1));
     }
