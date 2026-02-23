@@ -1,11 +1,12 @@
 import 'dart:convert';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class TtsService {
-  static const String _apiKey = '';
-  static const String _voiceId = 'yj30vwTGJxSHezdAGsv9';
+  static final String _apiKey = dotenv.env['ELEVENLABS_KEY'] ?? '';
+  static final String _voiceId = dotenv.env['ELEVENLABS_VOICE_ID'] ?? '';
 
   static final AudioPlayer _audioPlayer = AudioPlayer();
 

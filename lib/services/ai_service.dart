@@ -1,8 +1,9 @@
 import 'dart:convert';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 
 class AiService {
-  static const _apiKey = '';
+  static final String _apiKey = dotenv.env['ANTHROPIC_KEY'] ?? '';
 
   static const _endpoint = 'https://api.anthropic.com/v1/messages';
   static const _model = 'claude-haiku-4-5-20251001';
