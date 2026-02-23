@@ -1,9 +1,11 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 import '../services/storage_service.dart';
 import '../services/tts_service.dart';
+import '../services/speech_service.dart';
 import '../widgets/family_button.dart';
 
 class MainScreen extends StatefulWidget {
@@ -23,8 +25,14 @@ class _MainScreenState extends State<MainScreen> {
 
   int _playingIndex = -1;
   bool _isRecording = false;
+  bool _hasOwnRecording = false;
+  String _ownVoicePath = '';
+
+  bool _isTalking = false;
   String _status = '';
   int _titleTapCount = 0;
+
+  static const int _ownVoiceIndex = 4;
 
   @override
   void initState() {
@@ -43,11 +51,18 @@ class _MainScreenState extends State<MainScreen> {
     final name = await StorageService.getPatientName();
     final names = await StorageService.getFamilyNames();
     final paths = await StorageService.getFamilyPaths();
+
+    final dir = await getApplicationDocumentsDirectory();
+    final ownPath = '${dir.path}/patient_voice.m4a';
+    final exists = await File(ownPath).exists();
+
     if (!mounted) return;
     setState(() {
       _patientName = name;
       _familyNames = names;
       _familyPaths = paths;
+      _ownVoicePath = ownPath;
+      _hasOwnRecording = exists;
     });
   }
 
@@ -61,10 +76,7 @@ class _MainScreenState extends State<MainScreen> {
     await _player.stop();
 
     if (_playingIndex == index) {
-      setState(() {
-        _playingIndex = -1;
-        _status = '';
-      });
+      setState(() { _playingIndex = -1; _status = ''; });
       return;
     }
 
@@ -75,24 +87,82 @@ class _MainScreenState extends State<MainScreen> {
     });
   }
 
+  Future<void> _playOwnVoice() async {
+    if (!_hasOwnRecording) return;
+
+    await _player.stop();
+
+    if (_playingIndex == _ownVoiceIndex) {
+      setState(() { _playingIndex = -1; _status = ''; });
+      return;
+    }
+
+    await _player.play(DeviceFileSource(_ownVoicePath));
+    setState(() {
+      _playingIndex = _ownVoiceIndex;
+      _status = 'Playing your voice...';
+    });
+  }
+
   Future<void> _talkToMe() async {
+    if (_isTalking) {
+      await TtsService.stop();
+      await SpeechService.stop();
+      setState(() { _isTalking = false; _status = ''; });
+      return;
+    }
+
     await _player.stop();
     setState(() {
       _playingIndex = -1;
-      _status = 'Speaking...';
+      _isTalking = true;
+      _status = 'Speaking…';
     });
-    await TtsService.talkToMe();
-    setState(() => _status = '');
+
+    try {
+      final prompt = await TtsService.nextPrompt();
+      await TtsService.speakAndWait(prompt);
+      if (!_isTalking || !mounted) return;
+
+      setState(() => _status = 'I\'m listening… 🎙');
+      final heard = await SpeechService.listen(
+        duration: const Duration(seconds: 12),
+      );
+      if (!_isTalking || !mounted) return;
+
+      if (heard.trim().isNotEmpty) {
+        setState(() => _status = '"${heard.trim()}"');
+        await Future.delayed(const Duration(seconds: 2));
+        if (!_isTalking || !mounted) return;
+      }
+
+      setState(() => _status = 'Speaking…');
+      final affirmation = await TtsService.nextAffirmation();
+      await TtsService.speakAndWait(affirmation);
+
+    } finally {
+      if (mounted) {
+        setState(() { _isTalking = false; _status = ''; });
+      }
+    }
   }
 
   Future<void> _toggleRecording() async {
     if (_isRecording) {
       final path = await _recorder.stop();
+      final saved = path != null && await File(path).exists();
       setState(() {
         _isRecording = false;
-        _status = path != null ? 'Recording saved' : 'Nothing recorded';
+        _hasOwnRecording = saved;
+        if (saved) _ownVoicePath = path!;
+        _status = saved
+            ? 'Recording saved — tap Play My Voice to hear it'
+            : 'Nothing recorded';
       });
     } else {
+      await _player.stop();
+      setState(() { _playingIndex = -1; });
+
       final hasPermission = await _recorder.hasPermission();
       if (!hasPermission) {
         setState(() => _status = 'Microphone permission needed');
@@ -109,7 +179,7 @@ class _MainScreenState extends State<MainScreen> {
 
       setState(() {
         _isRecording = true;
-        _status = 'Recording your voice...';
+        _status = 'Recording your voice…';
       });
     }
   }
@@ -131,6 +201,8 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isPlayingOwnVoice = _playingIndex == _ownVoiceIndex;
+
     return Scaffold(
       backgroundColor: const Color(0xFFFAF7F2),
       body: SafeArea(
@@ -163,6 +235,7 @@ class _MainScreenState extends State<MainScreen> {
                 ),
               ),
             const SizedBox(height: 32),
+
             Expanded(
               child: GridView.count(
                 crossAxisCount: 2,
@@ -180,59 +253,82 @@ class _MainScreenState extends State<MainScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: SizedBox(
-                width: double.infinity,
-                height: 64,
-                child: FilledButton.icon(
-                  onPressed: _talkToMe,
-                  icon: const Icon(Icons.chat_bubble_outline, size: 28),
-                  label: const Text(
-                    'Talk to Me',
-                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                  ),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF2C6FAC),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                  ),
-                ),
-              ),
+
+            _ActionButton(
+              onPressed: _talkToMe,
+              icon: _isTalking ? Icons.cancel_outlined : Icons.chat_bubble_outline,
+              label: _isTalking ? 'Stop Talking' : 'Talk to Me',
+              color: _isTalking
+                  ? const Color(0xFF3A9E8F)
+                  : const Color(0xFF2C6FAC),
             ),
             const SizedBox(height: 12),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: SizedBox(
-                width: double.infinity,
-                height: 64,
-                child: FilledButton.icon(
-                  onPressed: _toggleRecording,
-                  icon: Icon(
-                    _isRecording ? Icons.stop_circle : Icons.mic,
-                    size: 28,
-                  ),
-                  label: Text(
-                    _isRecording ? 'Stop Recording' : 'Record My Voice',
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: _isRecording
-                        ? const Color(0xFF3A9E8F)
-                        : const Color(0xFF2C6FAC),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                  ),
-                ),
-              ),
+
+            _ActionButton(
+              onPressed: _toggleRecording,
+              icon: _isRecording ? Icons.stop_circle : Icons.mic,
+              label: _isRecording
+                  ? 'Stop Recording'
+                  : _hasOwnRecording
+                  ? 'Re-record My Voice'
+                  : 'Record My Voice',
+              color: _isRecording
+                  ? const Color(0xFF3A9E8F)
+                  : const Color(0xFF2C6FAC),
             ),
+            const SizedBox(height: 12),
+
+            if (_hasOwnRecording)
+              _ActionButton(
+                onPressed: _playOwnVoice,
+                icon: isPlayingOwnVoice ? Icons.stop_circle : Icons.volume_up,
+                label: isPlayingOwnVoice ? 'Stop' : 'Play My Voice',
+                color: isPlayingOwnVoice
+                    ? const Color(0xFF3A9E8F)
+                    : const Color(0xFF5B8FBF),
+              ),
+
             const SizedBox(height: 24),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ActionButton extends StatelessWidget {
+  final VoidCallback onPressed;
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  const _ActionButton({
+    required this.onPressed,
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: SizedBox(
+        width: double.infinity,
+        height: 64,
+        child: FilledButton.icon(
+          onPressed: onPressed,
+          icon: Icon(icon, size: 28),
+          label: Text(
+            label,
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+          ),
+          style: FilledButton.styleFrom(
+            backgroundColor: color,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+          ),
         ),
       ),
     );

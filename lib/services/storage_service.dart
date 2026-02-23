@@ -20,12 +20,16 @@ class StorageService {
 
   static Future<List<String>> getFamilyNames() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getStringList(_keyFamilyNames) ?? ['', '', '', ''];
+    final list = prefs.getStringList(_keyFamilyNames) ?? [];
+    while (list.length < 4) list.add('');
+    return list;
   }
 
   static Future<List<String>> getFamilyPaths() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getStringList(_keyFamilyPaths) ?? ['', '', '', ''];
+    final list = prefs.getStringList(_keyFamilyPaths) ?? [];
+    while (list.length < 4) list.add('');
+    return list;
   }
 
   static Future<void> saveFamilyNames(List<String> names) async {
